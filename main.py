@@ -2,60 +2,64 @@ import sys
 import pygame
 import keras
 import tensorflow
-from keras.layers import Conv2D, MaxPool2D, Flatten, TimeDistributed, LSTM, Dense
+from keras.layers import Conv2D, MaxPool2D, Flatten, TimeDistributed, LSTM, Dense, BatchNormalization
 import grid
+import random
 import numpy as np
 from pygame.locals import KEYDOWN, K_q
 
 # Constants
-SIZE = (100, 100)
+SIZE = (36, 36)
 CHANNELS = 3
-DELAYFRAMES = 1
-EPOCHS = 10
+NBOUT = 9
+EPOCHS = 50
+MAXDELAYFRAMES = 10
+
+def build_model(shape=(None, SIZE[0], SIZE[1], CHANNELS), nbout=NBOUT):
+    # Build cnn
+    cnn = keras.Sequential()
+    cnn.add(Conv2D(8, (3, 3), input_shape=shape[1:], padding='same', activation='relu'))
+    cnn.add(BatchNormalization())
+    cnn.add(MaxPool2D())
+    cnn.add(Conv2D(8, (5, 5), padding='same', activation='relu'))
+    cnn.add(BatchNormalization())
+    cnn.add(MaxPool2D())
+    cnn.add(Conv2D(64, (7, 7), padding='same', activation='relu'))
+    cnn.add(BatchNormalization())
+    cnn.add(MaxPool2D())
+    cnn.add(Flatten())
+
+    # Build rnn
+    rnn = keras.Sequential()
+    rnn = LSTM(nbout, input_shape=shape[1:], activation='softmax')
 
 
-def build_conv(shape=(SIZE[0], SIZE[1], 3)):
-    model = keras.Sequential()
-    model.add(Conv2D(36, (7, 7), input_shape=shape, padding='same', activation='relu'))
-    model.add(MaxPool2D())
-    model.add(Conv2D(72, (6, 6), padding='same', activation='relu'))
-    model.add(MaxPool2D())
-    model.add(Conv2D(108, (5, 5), padding='same', activation='relu'))
-    model.add(MaxPool2D())
-    model.add(Flatten())
+    # Combine both
+    main_input = keras.Input(shape=shape)
+    model = TimeDistributed(cnn)(main_input)
+    model = rnn(model)
 
-    print(model.summary())
-    return model
-
-
-def build_model(shape=(DELAYFRAMES+3, SIZE[0], SIZE[1], 3), nbout=16):
-    # Create the conv-pool layers
-    conv = build_conv(shape[1:])
-    # Create the model
-    model = keras.Sequential()
-    # Add the conv-pool layers
-    model.add(TimeDistributed(conv, input_shape=shape))
-    # Add LSTM layer
-    model.add(LSTM(16, activation='softmax'))
-    print(model.summary())
-    return model
+    # Build final model
+    final_model = keras.Model(inputs=main_input, outputs=model)
+    print(final_model.summary())
+    return final_model
 
 
 def main():
-    # genTrainData(1000)
-    train_inputs = np.load('train_inputs.npy')
-    train_labels = np.load('train_labels.npy')
-    train_labels = tensorflow.keras.utils.to_categorical(train_labels, 16)
+    # genTrainData(3000)
+    train_inputs = np.load('train_inputs.npy', allow_pickle=True)
+    train_labels = np.load('train_labels.npy', allow_pickle=True)
+    train_labels = tensorflow.keras.utils.to_categorical(train_labels, 9)
 
     #print(train_inputs.shape)
 
     model = build_model()
     opt = keras.optimizers.Adam(0.001)
-    model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['acc'])
+    model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
     model.fit(
-        train_inputs[:200],
-        train_labels[:200],
-        validation_split=0.25,
+        train_inputs[:1000],
+        train_labels[:1000],
+        validation_split=0.1,
         verbose=1,
         epochs=EPOCHS,
         batch_size=10
@@ -83,7 +87,7 @@ def example():
     pygame.display.set_icon(icon)
 
     # Initialize the grid
-    minigrid = grid.Grid(screen, 4, 1, 2)
+    minigrid = grid.Grid(screen, 3, 1, 1)
 
     for i in range(1):
         # Empty grid for first frame
@@ -103,26 +107,24 @@ def example():
 
         # Empty grid again for a random number of frames
         minigrid.update()
-        for j in range(DELAYFRAMES):
-            checkEvents()
+        delay_frames = random.randint(1, MAXDELAYFRAMES)
+        for j in range(delay_frames):
             minigrid.drawGrid()
             pygame.display.update()
             clock.tick(1)
 
-        # New shapes for last frame
+        # New shapes for one frame
         minigrid.update(grid.Grid.genShapesTypes(shape[0]))
-        checkEvents()
         minigrid.drawGrid()
         pygame.display.update()
         clock.tick(1)
-        print(minigrid.shapesCells[0][0] * minigrid.size + minigrid.shapesCells[0][1])
 
-        # train_data = pd.DataFrame(pd.read_csv('train.csv')).to_numpy()
-        # img = train_data[0,0][0]
-        # print(img)
-        # pygame.surfarray.blit_array(screen,img)
-        # pygame.display.update()
-        # clock.tick(1)
+        minigrid.update()
+        for j in range(MAXDELAYFRAMES - delay_frames):
+            minigrid.drawGrid()
+            pygame.display.update()
+            clock.tick(1)
+        print(minigrid.shapesCells[0][0] * minigrid.size + minigrid.shapesCells[0][1])
 
 
 # Generate training set of given size and save it as a .csv file for later use
@@ -144,7 +146,7 @@ def genTrainData(samples):
     pygame.display.set_icon(icon)
 
     # Initialize the grid
-    minigrid = grid.Grid(screen, 4, 1, 2)
+    minigrid = grid.Grid(screen, 3, 1, 1)
 
     train_inputs = []
     train_labels = []
@@ -164,16 +166,23 @@ def genTrainData(samples):
 
         # Empty grid again for a random number of frames
         minigrid.update()
-        for j in range(DELAYFRAMES):
+        delay_frames = random.randint(1,MAXDELAYFRAMES)
+        for j in range(delay_frames):
             minigrid.drawGrid()
             pygame.display.update()
             sequence.append(pygame.surfarray.array3d(screen))
 
-        # New shapes for last frame
+        # New shapes for one frame
         minigrid.update(grid.Grid.genShapesTypes(shape[0]))
         minigrid.drawGrid()
         pygame.display.update()
         sequence.append(pygame.surfarray.array3d(screen))
+
+        minigrid.update()
+        for j in range(MAXDELAYFRAMES-delay_frames):
+            minigrid.drawGrid()
+            pygame.display.update()
+            sequence.append(pygame.surfarray.array3d(screen))
 
         # Save sequence of images and correct cell to train data
         train_inputs.append(sequence)

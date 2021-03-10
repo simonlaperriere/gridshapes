@@ -41,7 +41,7 @@ class Grid:
 
         for i in range(nbShapes):
             self.shapesColors.append(tuple(np.random.choice(range(256), size=3)))
-            self.shapesSize.append(random.randint(15, cellDim-1))
+            self.shapesSize.append(random.randint(5, cellDim-1))
             cell = self.shapesCells[i]
 
             # Shape is a square
